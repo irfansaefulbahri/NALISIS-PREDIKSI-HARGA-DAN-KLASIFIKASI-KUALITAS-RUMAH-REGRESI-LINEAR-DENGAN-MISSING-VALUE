@@ -1,1 +1,252 @@
+# ============================================
+# Dengan Mising Value
+# ============================================
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import warnings
+warnings.filterwarnings('ignore')
+
+# ============================================
+# 1. UPLOAD FILE CSV DARI KOMPUTER
+# ============================================
+
+# Untuk Google Colab
+try:
+    from google.colab import files
+    print("="*60)
+    print("UPLOAD FILE CSV")
+    print("="*60)
+    print("Silakan upload file CSV Anda (DATA RUMAH.csv)")
+    print("Format yang diterima: .csv, .xlsx")
+    uploaded = files.upload()
+
+    # Ambil nama file yang diupload
+    file_name = list(uploaded.keys())[0]
+    print(f"\nFile berhasil diupload: {file_name}")
+
+    # Baca file berdasarkan ekstensi
+    if file_name.endswith('.csv'):
+        df = pd.read_csv(file_name)
+    elif file_name.endswith('.xlsx'):
+        df = pd.read_excel(file_name)
+    else:
+        raise ValueError("Format file tidak didukung. Gunakan .csv atau .xlsx")
+
+except ImportError:
+    # Untuk Jupyter Notebook / Local Environment
+    import os
+    from IPython.display import FileLink, display
+
+    print("="*60)
+    print("UPLOAD FILE CSV (Local Environment)")
+    print("="*60)
+    print("Letakkan file CSV Anda di direktori yang sama dengan notebook ini")
+    print("atau masukkan path lengkap file:")
+
+    # Opsi 1: Input manual path file
+    file_path = input("\nMasukkan path file CSV/Excel: ").strip()
+
+    # Hapus tanda kutip jika ada
+    file_path = file_path.strip('"').strip("'")
+
+    if os.path.exists(file_path):
+        if file_path.endswith('.csv'):
+            df = pd.read_csv(file_path)
+        elif file_path.endswith('.xlsx'):
+            df = pd.read_excel(file_path)
+        else:
+            raise ValueError("Format file tidak didukung. Gunakan .csv atau .xlsx")
+        print(f"\nFile berhasil dibaca: {file_path}")
+    else:
+        # Opsi 2: Gunakan file default jika ada
+        default_files = ['DATA RUMAH.csv', 'DATA_RUMAH.csv', 'DATA_RUMAH.xlsx', 'data_rumah.csv']
+        found = False
+        for default in default_files:
+            if os.path.exists(default):
+                if default.endswith('.csv'):
+                    df = pd.read_csv(default)
+                else:
+                    df = pd.read_excel(default)
+                print(f"\nMenggunakan file default: {default}")
+                found = True
+                break
+        if not found:
+            print("\nERROR: File tidak ditemukan!")
+            print("Pastikan file CSV/Excel sudah diupload atau path benar.")
+            # Contoh pembuatan data dummy (optional)
+            print("\nMembuat data dummy untuk contoh...")
+            df = pd.DataFrame({
+                'NO': range(1, 101),
+                'NAMA RUMAH': ['Rumah Contoh ' + str(i) for i in range(1, 101)],
+                'HARGA': np.random.randint(1000000000, 20000000000, 100),
+                'LB': np.random.randint(50, 500, 100),
+                'LT': np.random.randint(50, 500, 100),
+                'KT': np.random.randint(2, 7, 100),
+                'KM': np.random.randint(1, 6, 100),
+                'GRS': np.random.randint(0, 4, 100)
+            })
+            print("Data dummy berhasil dibuat!")
+
+# ============================================
+# 2. PREPROCESSING - RENAME COLUMN
+# ============================================
+print("\n" + "="*60)
+print("PREPROCESSING DATA")
+print("="*60)
+
+# Rename kolom
+df = df.rename(columns={
+    'NO': 'nomor',
+    'NAMA RUMAH': 'nama_rumah',
+    'HARGA': 'harga',
+    'LB': 'lb',
+    'LT': 'lt',
+    'KT': 'kt',
+    'KM': 'km',
+    'GRS': 'grs'
+})
+
+# Konversi harga ke jutaan Rupiah (jika masih dalam nominal penuh)
+if df['harga'].max() > 1000000:
+    df['harga'] = (df['harga'] / 1000000).astype(int)
+    print("Harga dikonversi ke jutaan Rupiah")
+
+# Hapus kolom nomor jika ada
+if 'nomor' in df.columns:
+    df.drop(columns=['nomor'], inplace=True)
+
+print(f"Jumlah data: {len(df)} baris")
+print(f"Kolom yang tersedia: {df.columns.tolist()}")
+
+# ============================================
+# 3. SIMULASI MISSING VALUE (5% dari total data)
+# ============================================
+print("\n" + "="*60)
+print("SIMULASI MISSING VALUE")
+print("="*60)
+
+# Cek apakah sudah ada missing value
+existing_missing = df.isna().sum().sum()
+if existing_missing > 0:
+    print(f"Peringatan: Data sudah memiliki {existing_missing} missing value!")
+    print("Missing value yang sudah ada akan dipertahankan.")
+
+# Membuat missing value tambahan sebesar 5% pada kolom 'lb'
+np.random.seed(42)  # Untuk reproduksibilitas
+missing_percentage = 0.05
+n_missing = int(len(df) * missing_percentage)
+
+# Pilih index secara acak (hanya dari baris yang tidak kosong)
+available_indices = df[df['lb'].notna()].index.tolist()
+n_missing = min(n_missing, len(available_indices))
+missing_indices = np.random.choice(available_indices, size=n_missing, replace=False)
+
+# Simpan nilai asli untuk dokumentasi
+original_lb_values = df.loc[missing_indices, 'lb'].copy()
+
+# Buat missing value (NaN) pada kolom 'lb'
+df.loc[missing_indices, 'lb'] = np.nan
+
+print(f"Jumlah missing value yang dibuat: {n_missing} baris ({missing_percentage*100}%)")
+print(f"Total missing setelah simulasi: {df['lb'].isna().sum()} baris")
+print(f"Index yang terkena missing: {sorted(missing_indices)[:15]}...")
+
+# ============================================
+# 4. IMPUTASI MISSING VALUE DENGAN MEDIAN
+# ============================================
+print("\n" + "="*60)
+print("IMPUTASI MISSING VALUE")
+print("="*60)
+
+# Hitung median dari data LB yang valid
+median_lb = df['lb'].median()
+print(f"Nilai median LB (dari data valid): {median_lb:.2f} m²")
+
+# Imputasi: isi missing value dengan median
+df['lb'].fillna(median_lb, inplace=True)
+
+# Verifikasi
+print(f"\nSetelah imputasi:")
+print(f"  Jumlah missing value: {df['lb'].isna().sum()}")
+print(f"  Semua data telah terisi lengkap")
+
+# ============================================
+# 5. TAMPILKAN DATA SETELAH PROSES
+# ============================================
+print("\n" + "="*60)
+print("DATA SETELAH PROSES (5 baris pertama)")
+print("="*60)
+print(df.head().to_string())
+
+print("\n" + "="*60)
+print("STATISTIK DATA")
+print("="*60)
+print(df.describe())
+
+# ============================================
+# 6. SIMPAN DATA YANG SUDAH DIPROSES KE CSV
+# ============================================
+output_filename = 'DATA_RUMAH_CLEAN.csv'
+df.to_csv(output_filename, index=False, encoding='utf-8')
+print(f"\nData bersih telah disimpan ke: {output_filename}")
+
+# ============================================
+# 7. DOWNLOAD FILE (Untuk Google Colab)
+# ============================================
+try:
+    from google.colab import files
+    files.download(output_filename)
+    print(f"File '{output_filename}' telah di-download!")
+except:
+    print(f"File '{output_filename}' tersedia di direktori saat ini.")
+
+# ============================================
+# 8. PEMODELAN (Contoh Ringkas)
+# ============================================
+print("\n" + "="*60)
+print("PEMODELAN REGRESI LINEAR")
+print("="*60)
+
+# Persiapan data untuk model
+X = df[['lb', 'lt', 'kt', 'km', 'grs']].values
+y = df['harga'].values
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Training model
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# Prediksi
+y_pred = model.predict(X_test)
+
+# Evaluasi
+r2 = r2_score(y_test, y_pred)
+mae = mean_absolute_error(y_test, y_pred)
+
+print(f"R² Score: {r2:.4f}")
+print(f"MAE: {mae:.2f} Juta Rp")
+
+# ============================================
+# 9. TRACKING MISSING VALUE
+# ============================================
+tracking_df = pd.DataFrame({
+    'index_original': missing_indices,
+    'nilai_asli': original_lb_values,
+    'nilai_imputasi': [median_lb] * len(missing_indices),
+    'keterangan': 'diimputasi dengan median'
+})
+tracking_filename = 'MISSING_VALUE_TRACKING.csv'
+tracking_df.to_csv(tracking_filename, index=False)
+print(f"\nFile tracking missing value: {tracking_filename}")
+
+print("\n" + "="*60)
+print("PROSES SELESAI!")
+print("="*60)
